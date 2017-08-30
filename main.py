@@ -291,7 +291,7 @@ def get_args():
                         default="./testdata")
     parser.add_argument("--output_dir", type=str,
                         default="./output")
-    parser.add_argument("--rnn_context_len", type=int, default=32)
+    parser.add_argument("--rnn_context_len", type=int, default=128)
     parser.add_argument("--max_files", type=int, default=100)
     parser.set_defaults(nice=False)
     args = parser.parse_args()

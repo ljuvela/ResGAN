@@ -8,6 +8,29 @@ from sklearn.externals import joblib
 # netcdf for reading packaged data
 from scipy.io import netcdf
 
+# load mean and variance
+class norm_stats:
+
+    def  __init__(self, filename, directory):
+        f = os.path.join(directory, filename)
+        with netcdf.netcdf_file(f, 'r') as fid:
+            self.outputMeans = fid.variables['outputMeans'][:].copy()
+            self.outputStdevs = fid.variables['outputStdevs'][:].copy()
+            self.inputMeans = fid.variables['inputMeans'][:].copy()
+            self.inputStdevs = fid.variables['inputStdevs'][:].copy()
+
+    def getOutputMean(self):
+        return self.outputMeans
+
+    def getOutputStd(self):
+        return self.outputStdevs
+
+    def getInputMean(self):
+        return self.inputMeans
+
+    def getInputStd(self):
+        return self.inputStdevs
+
 # function for loading data.nc NetCDF files packaged with Xin's tools
 def load_data(files_list, data_dir, num_files=30, context_len=32):
     #files_list = os.listdir(data_dir)

@@ -41,10 +41,9 @@ mpl.use('Agg') # no need for X-server
 from matplotlib import pyplot as plt
 
 # 'Globals'
-NFFT = 512
-fbins = NFFT/2+1
+fbins = 400
+NFFT = (fbins-1)*2
 
-max_voiced_freq = 1500
 fs = 16000
 
 # FFT analysis window
@@ -78,6 +77,9 @@ def theano_fft(x):
 
     # floor (prevents log from going to -Inf)
     x = T.maximum(x, 1e-9)
+
+    # power companding/compression
+    x = x**(1.0/3.0)
 
     return x 
 
@@ -196,18 +198,22 @@ def time_glot_model(timesteps=128, input_dim=48, output_dim=400, model_name="tim
 
     return model
 
-def generator(input_dim=400, output_dim=400):
+def generator(input_dim=400, ac_dim=48, output_dim=400):
     
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
     vuv_input = Input((1,), name="vuv_input")
+    ac_input = Input((ac_dim,), name="ac_input")
 
     pls = Reshape((input_dim, 1))(pls_input)    
     noise = Reshape((input_dim, 1))(noise_input)
     vuv = Reshape((1,1))(vuv_input)
     vuv = UpSampling1D(size=input_dim)(vuv) # is this needed or is broadcasting automatic?
 
-    x = concatenate([pls, noise], axis=2) # concat as different channels
+    ac = Dense(input_dim, activation='relu')(ac_input)
+    ac = Reshape((input_dim,1))(ac)
+
+    x = concatenate([pls, noise, ac], axis=2) # concat as different channels
 
     x = Convolution1D(filters=100,
                         kernel_size=15,
@@ -234,13 +240,6 @@ def generator(input_dim=400, output_dim=400):
     x = BatchNormalization()(x)
     x = LeakyReLU(0.1)(x)
 
-    x = Convolution1D(filters=100,
-                        kernel_size=15,
-                        padding='same',
-                        strides=1)(x)
-    x = BatchNormalization()(x)
-    x = LeakyReLU(0.1)(x)
-
     x = concatenate([pls, x], axis=2) # concat as different channels
                     
     x = Convolution1D(filters=1,
@@ -249,7 +248,7 @@ def generator(input_dim=400, output_dim=400):
                         strides=1)(x)
 
     # tanh activation (GAN hacks)
-    #x = Activation('tanh')(x)
+    x = Activation('tanh')(x)
 
     vuv = Activation('sigmoid')(vuv)
     y = multiply([vuv, pls]) # voicing gate for deterministic component
@@ -259,17 +258,24 @@ def generator(input_dim=400, output_dim=400):
              
     # remove singleton outer dimension 
     x = Reshape((output_dim,))(x)
+
+    # add fft channel to output
+    x_fft = fft_layer(x)
      
-    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x],
+    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, x_fft],
                   name="generator")
 
     return model
 
 def discriminator(input_dim=400):
 
-    pls_input = Input(shape=(input_dim,), name="pls_input")
+    pls_input = Input(shape=(input_dim,), name="pls_input") 
+    fft_input = Input(shape=(input_dim,), name="fft_input") 
 
-    x = Reshape((input_dim, 1))(pls_input)    
+    x = Reshape((input_dim, 1))(pls_input)
+    x_fft = Reshape((input_dim, 1))(fft_input)    
+
+    x = concatenate([x, x_fft], axis=2) # concat as different channels
     
     # input shape batch_size x 1 (number of channels) x 400 (length of pulse)
     x = Convolution1D(filters=64,
@@ -292,6 +298,8 @@ def discriminator(input_dim=400):
     x = BatchNormalization()(x)
     x = LeakyReLU(0.1)(x)
 
+    peek_output = x # used for generator training regularization
+
     # shape [batch_size x 256 x 12]
     x = Convolution1D(filters=128,
                         kernel_size=5,
@@ -309,24 +317,25 @@ def discriminator(input_dim=400):
     # shape [batch_size x 1 x 1] 
     x = Reshape((1,))(x)
 
-    model = Model(inputs=[pls_input], outputs=[x],
+    model = Model(inputs=[pls_input, fft_input], outputs=[x, peek_output],
                   name="discriminator")
 
     return model
 
-def gan_container(generator, discriminator, input_dim=400):
+def gan_container(generator, discriminator, input_dim=400, ac_dim=48):
    
     discriminator.trainable = False
 
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
     vuv_input = Input((1,), name="vuv_input")
+    ac_input = Input((ac_dim,), name="ac_input")
 
-    x = generator([pls_input, noise_input, vuv_input])
+    x, x_fft = generator([pls_input, noise_input, vuv_input, ac_input])
     #x = win_layer(x) # apply window
-    x = discriminator(x)
+    x, peek_output = discriminator([x, x_fft])
 
-    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x],
+    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, peek_output],
                   name="gan_container")
     return model
 
@@ -464,10 +473,10 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
     gen_model.compile(loss='mse', optimizer="adam")
 
     disc_model.trainable = False
-    disc_on_gen.compile(loss='mse', optimizer=optim_container)
+    disc_on_gen.compile(loss=['mse','mse'], loss_weights=[1.0, 1.0], optimizer=optim_container) # use peek adversarial and peek mse loss for training generator
 
     disc_model.trainable = True
-    disc_model.compile(loss='mse', optimizer=optim_discriminator)
+    disc_model.compile(loss=['mse','mse'], loss_weights=[1.0, 0.0], optimizer=optim_discriminator) # don't use peek loss for discriminator
 
     print "Discriminator model:"
     print disc_model.summary()
@@ -511,43 +520,46 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                 y_feats_batch = Y_train[
                     index * BATCH_SIZE:(index + 1) * BATCH_SIZE]
 
-                x_feats_batch_fft = fft_mod.predict(x_feats_batch)
-
                 x_pred_batch, x_pred_batch_fft = pls_model.predict([y_feats_batch])
+                
+                # take acoustic feats with no history
+                ac_feats = np.reshape(y_feats_batch[:,-1,:],
+                                      (BATCH_SIZE, y_feats_batch.shape[-1]))
                 
                 pls_pred = x_pred_batch
                 pls_real = x_feats_batch
 
+                # evaluate target fft
+                fft_real = fft_mod.predict(pls_real)
 
                 vuv_batch = y_feats_batch[:,-1,-1] #take last timestep, vuv is last feature, 
                 vuv_batch = vuv_batch * s_vuv + m_vuv
                 # quantize vuv?
 
+                # train generator through discriminator
+                noise = np.random.randn(BATCH_SIZE, pls_len)
+                _, peek_real = disc_model.predict([pls_real, fft_real])
+                disc_model.trainable = False
+                loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch, ac_feats], [label_real, peek_real])
+ 
                 noise = np.random.randn(BATCH_SIZE, pls_len)
 
                 # train discriminator with real data
                 disc_model.trainable = True
-                loss_dr = disc_model.train_on_batch([pls_real], [label_real])
-                #loss_dr = disc_model.train_on_batch([win32*pls_real], [label_real])
+                loss_dr = disc_model.train_on_batch([pls_real, fft_real], [label_real, peek_real])
 
                 # train discriminator with fake data
-                pls_fake = gen_model.predict([pls_pred, noise, vuv_batch])
-                loss_df = disc_model.train_on_batch([pls_fake], [label_fake])
-                #loss_df = disc_model.train_on_batch([win32*pls_fake], [label_fake])
-
-                # new noise realization!! 
-                noise = np.random.randn(BATCH_SIZE, pls_len)
-
-                # train generator through discriminator
-                disc_model.trainable = False
-                loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch], [label_real])
+                pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch, ac_feats])
+                loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
         
+                #import ipdb; ipdb.set_trace()
+
+                if (index + total_batches) % 50 == 0:
+
+                    print("training batch %d, G loss: %f, D loss (real): %f, D loss (fake): %f" %
+                          (index + total_batches, loss_g[0], loss_dr[0], loss_df[0]))
+
                 if (index + total_batches) % 100 == 0:
-
-                    print("training batch %d,  G loss: %f , D loss (real): %f, D loss (fake): %f" %
-                          (index + total_batches, loss_g, loss_dr, loss_df))
-
-                if (index + total_batches) % 500 == 0:
 
                     wav_ref = pls_real[0,:]
                     wav_gen = pls_pred[0,:]
@@ -562,16 +574,17 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
     print "Finished noise model training" 
 
 
-def generate(file_list, data_dir, output_dir, context_len=32, stats=None):
+def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
+             base_model_path='./pls.model', gan_model_path='./noise_gen.model'):
     
-    pulse_model = time_glot_model()
+    pulse_model = time_glot_model(timesteps=context_len)
     gan_model = generator()
     
     pulse_model.compile(loss='mse', optimizer="adam")
     gan_model.compile(loss='mse', optimizer="adam")
 
-    pulse_model.load_weights('./pls.model')
-    gan_model.load_weights('./noise_gen.model')
+    pulse_model.load_weights(base_model_path)
+    gan_model.load_weights(gan_model_path)
 
     m_vuv = stats.getInputMean()[-1]
     s_vuv = stats.getInputStd()[-1]
@@ -584,9 +597,12 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None):
             vuv = ac_data[:,-1,-1] #take last timestep, vuv is last feature, 
             vuv = vuv * s_vuv + m_vuv
 
+            # take acoustic feats with no history                                                
+            ac_feats = np.squeeze(ac_data[:,-1,:])
+                                  
             pls_pred, _ = pulse_model.predict([ac_data])
             noise = np.random.randn(pls_pred.shape[0], pls_pred.shape[1])
-            pls_gan = gan_model.predict([pls_pred, noise, vuv])
+            pls_gan, _ = gan_model.predict([pls_pred, noise, vuv, ac_feats])
             
             out_file = os.path.join(args.output_dir, fname + '.pls')
             pls_gan.astype(np.float32).tofile(out_file)
@@ -609,6 +625,8 @@ def get_args():
     parser.add_argument("--rnn_context_len", type=int, default=64)
     parser.add_argument("--max_files", type=int, default=100)
     parser.set_defaults(nice=False)
+    parser.add_argument("--gan_model", type=str,
+                        default=None)
     args = parser.parse_args()
     return args
 
@@ -661,7 +679,8 @@ if __name__ == "__main__":
 
         generate(data_dir=test_dir, file_list=file_list,
                  output_dir=args.output_dir,
-                 context_len=args.rnn_context_len, stats=stats)
+                 context_len=args.rnn_context_len, stats=stats,
+                 gan_model_path=args.gan_model)
         #input_data = load_test_data(te)
 
         

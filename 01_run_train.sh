@@ -3,8 +3,10 @@
 
 #python train_pls_noisegan.py --mode train --data ./traindata_genac/ 2>&1 > log_train.log
 
-TRAINDATA=/scratch/work/ljuvela/DATA/traindata_nick
-python train_pls_noisegan.py --mode train_pls_model --data $TRAINDATA --max_files=2
+TRAINDATA=/home/ljuvela/CODE/pls_model/traindata_genac
+#python train_pls_noisegan.py --mode train_noise_model --data $TRAINDATA --rnn_context_len=40 2>&1 > log_train_gan.log
+python train_peek_resgan.py --mode train --data $TRAINDATA --rnn_context_len=40 --batch_size=128 2>&1 > log_train_gan.log
+#python train_pls_noisegan.py --mode train --data $TRAINDATA --rnn_context_len=40 2>&1 > log_train.log
 
 # only train GAN part
 #python train_pls_noisegan.py --mode train_noise_model --data ./traindata_genac/ 2>&1 > log_train_gan.log
