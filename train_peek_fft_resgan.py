@@ -47,7 +47,8 @@ NFFT = (fbins-1)*2
 fs = 16000
 
 # FFT analysis window
-win_np = np.kaiser(400, 6.0)
+#win_np = np.kaiser(400, 6.0)
+win_np = np.hamming(400) # include values near edges to avoid don't care effects
 win = theano.shared(win_np)
 
 # GAN intermediate window
@@ -57,6 +58,13 @@ win32_gpu = theano.shared(win32.astype(np.float32))
 
 #from pls_utils import *
 from data_utils import *
+
+# edge smoothing window
+gen_filtwidths = np.asarray([15, 15, 15])
+edgelen = sum(gen_filtwidths-1)
+hannwin = np.hanning(edgelen)
+smoothwin = np.concatenate((hannwin[:edgelen/2], np.ones(400-edgelen), hannwin[edgelen/2:]))
+
 
 def theano_fft(x):
 
@@ -76,10 +84,13 @@ def theano_fft(x):
     x = x[:,:, 0]**2 + x[:,:, 1]**2 
 
     # floor (prevents log from going to -Inf)
-    x = T.maximum(x, 1e-9)
+    x = T.maximum(x, 1e-6)
 
-    # power companding/compression
-    x = x**(1.0/3.0)
+    # map to log domain where 0dB -> 1 and -60dB -> -1
+    x = (1.0/3.0)*T.log10(x) + 1.0
+
+    # scale to weigh errors
+    x = 0.1*x 
 
     return x 
 
@@ -203,17 +214,13 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
     vuv_input = Input((1,), name="vuv_input")
-    ac_input = Input((ac_dim,), name="ac_input")
 
     pls = Reshape((input_dim, 1))(pls_input)    
     noise = Reshape((input_dim, 1))(noise_input)
     vuv = Reshape((1,1))(vuv_input)
     vuv = UpSampling1D(size=input_dim)(vuv) # is this needed or is broadcasting automatic?
 
-    ac = Dense(input_dim, activation='relu')(ac_input)
-    ac = Reshape((input_dim,1))(ac)
-
-    x = concatenate([pls, noise, ac], axis=2) # concat as different channels
+    x = concatenate([pls, noise], axis=2) # concat as different channels
 
     x = Convolution1D(filters=100,
                         kernel_size=15,
@@ -262,7 +269,7 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
     # add fft channel to output
     x_fft = fft_layer(x)
      
-    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, x_fft],
+    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x, x_fft],
                   name="generator")
 
     return model
@@ -329,13 +336,12 @@ def gan_container(generator, discriminator, input_dim=400, ac_dim=48):
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
     vuv_input = Input((1,), name="vuv_input")
-    ac_input = Input((ac_dim,), name="ac_input")
 
-    x, x_fft = generator([pls_input, noise_input, vuv_input, ac_input])
+    x, x_fft = generator([pls_input, noise_input, vuv_input])
     #x = win_layer(x) # apply window
     x, peek_output = discriminator([x, x_fft])
 
-    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, peek_output],
+    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x, peek_output],
                   name="gan_container")
     return model
 
@@ -521,39 +527,39 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                     index * BATCH_SIZE:(index + 1) * BATCH_SIZE]
 
                 x_pred_batch, x_pred_batch_fft = pls_model.predict([y_feats_batch])
-                
-                # take acoustic feats with no history
-                ac_feats = np.reshape(y_feats_batch[:,-1,:],
-                                      (BATCH_SIZE, y_feats_batch.shape[-1]))
-                
+                                
                 pls_pred = x_pred_batch
                 pls_real = x_feats_batch
+
+                # smoothing windows to combat edge effects
+                pls_pred *= smoothwin
+                pls_real *= smoothwin
 
                 # evaluate target fft
                 fft_real = fft_mod.predict(pls_real)
 
                 vuv_batch = y_feats_batch[:,-1,-1] #take last timestep, vuv is last feature, 
                 vuv_batch = vuv_batch * s_vuv + m_vuv
-                # quantize vuv?
+
+                noise = np.random.randn(BATCH_SIZE, pls_len)
+                noise *= smoothwin
 
                 # train generator through discriminator
-                noise = np.random.randn(BATCH_SIZE, pls_len)
                 _, peek_real = disc_model.predict([pls_real, fft_real])
                 disc_model.trainable = False
-                loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch, ac_feats], [label_real, peek_real])
+                loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch], [label_real, peek_real])
  
                 noise = np.random.randn(BATCH_SIZE, pls_len)
+                noise *= smoothwin
 
                 # train discriminator with real data
                 disc_model.trainable = True
                 loss_dr = disc_model.train_on_batch([pls_real, fft_real], [label_real, peek_real])
 
                 # train discriminator with fake data
-                pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch, ac_feats])
+                pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch])
                 loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
         
-                #import ipdb; ipdb.set_trace()
-
                 if (index + total_batches) % 50 == 0:
 
                     print("training batch %d, G loss: %f, D loss (real): %f, D loss (fake): %f" %
@@ -596,13 +602,10 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
             
             vuv = ac_data[:,-1,-1] #take last timestep, vuv is last feature, 
             vuv = vuv * s_vuv + m_vuv
-
-            # take acoustic feats with no history                                                
-            ac_feats = np.squeeze(ac_data[:,-1,:])
                                   
             pls_pred, _ = pulse_model.predict([ac_data])
             noise = np.random.randn(pls_pred.shape[0], pls_pred.shape[1])
-            pls_gan, _ = gan_model.predict([pls_pred, noise, vuv, ac_feats])
+            pls_gan, _ = gan_model.predict([pls_pred, noise, vuv])
             
             out_file = os.path.join(args.output_dir, fname + '.pls')
             pls_gan.astype(np.float32).tofile(out_file)

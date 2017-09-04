@@ -258,11 +258,8 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
              
     # remove singleton outer dimension 
     x = Reshape((output_dim,))(x)
-
-    # add fft channel to output
-    x_fft = fft_layer(x)
      
-    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, x_fft],
+    model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x],
                   name="generator")
 
     return model
@@ -270,12 +267,8 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
 def discriminator(input_dim=400):
 
     pls_input = Input(shape=(input_dim,), name="pls_input") 
-    fft_input = Input(shape=(input_dim,), name="fft_input") 
 
     x = Reshape((input_dim, 1))(pls_input)
-    x_fft = Reshape((input_dim, 1))(fft_input)    
-
-    x = concatenate([x, x_fft], axis=2) # concat as different channels
     
     # input shape batch_size x 1 (number of channels) x 400 (length of pulse)
     x = Convolution1D(filters=64,
@@ -317,7 +310,7 @@ def discriminator(input_dim=400):
     # shape [batch_size x 1 x 1] 
     x = Reshape((1,))(x)
 
-    model = Model(inputs=[pls_input, fft_input], outputs=[x, peek_output],
+    model = Model(inputs=[pls_input], outputs=[x, peek_output],
                   name="discriminator")
 
     return model
@@ -331,9 +324,9 @@ def gan_container(generator, discriminator, input_dim=400, ac_dim=48):
     vuv_input = Input((1,), name="vuv_input")
     ac_input = Input((ac_dim,), name="ac_input")
 
-    x, x_fft = generator([pls_input, noise_input, vuv_input, ac_input])
+    x = generator([pls_input, noise_input, vuv_input, ac_input])
     #x = win_layer(x) # apply window
-    x, peek_output = discriminator([x, x_fft])
+    x, peek_output = discriminator([x])
 
     model = Model(inputs=[pls_input, noise_input, vuv_input, ac_input], outputs=[x, peek_output],
                   name="gan_container")
@@ -529,16 +522,13 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                 pls_pred = x_pred_batch
                 pls_real = x_feats_batch
 
-                # evaluate target fft
-                fft_real = fft_mod.predict(pls_real)
-
                 vuv_batch = y_feats_batch[:,-1,-1] #take last timestep, vuv is last feature, 
                 vuv_batch = vuv_batch * s_vuv + m_vuv
                 # quantize vuv?
 
                 # train generator through discriminator
                 noise = np.random.randn(BATCH_SIZE, pls_len)
-                _, peek_real = disc_model.predict([pls_real, fft_real])
+                _, peek_real = disc_model.predict([pls_real])
                 disc_model.trainable = False
                 loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch, ac_feats], [label_real, peek_real])
  
@@ -546,14 +536,12 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
 
                 # train discriminator with real data
                 disc_model.trainable = True
-                loss_dr = disc_model.train_on_batch([pls_real, fft_real], [label_real, peek_real])
+                loss_dr = disc_model.train_on_batch([pls_real], [label_real, peek_real])
 
                 # train discriminator with fake data
-                pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch, ac_feats])
-                loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
+                pls_fake = gen_model.predict([pls_pred, noise, vuv_batch, ac_feats])
+                loss_df = disc_model.train_on_batch([pls_fake], [label_fake, peek_real])
         
-                #import ipdb; ipdb.set_trace()
-
                 if (index + total_batches) % 50 == 0:
 
                     print("training batch %d, G loss: %f, D loss (real): %f, D loss (fake): %f" %
@@ -602,7 +590,7 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
                                   
             pls_pred, _ = pulse_model.predict([ac_data])
             noise = np.random.randn(pls_pred.shape[0], pls_pred.shape[1])
-            pls_gan, _ = gan_model.predict([pls_pred, noise, vuv, ac_feats])
+            pls_gan = gan_model.predict([pls_pred, noise, vuv, ac_feats])
             
             out_file = os.path.join(args.output_dir, fname + '.pls')
             pls_gan.astype(np.float32).tofile(out_file)

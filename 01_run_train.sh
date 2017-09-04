@@ -5,7 +5,7 @@
 
 TRAINDATA=/home/ljuvela/CODE/pls_model/traindata_genac
 #python train_pls_noisegan.py --mode train_noise_model --data $TRAINDATA --rnn_context_len=40 2>&1 > log_train_gan.log
-python train_peek_resgan.py --mode train --data $TRAINDATA --rnn_context_len=40 --batch_size=128 2>&1 > log_train_gan.log
+python train_peek_fft_resgan.py --mode train --data ./traindata --rnn_context_len=40 --batch_size=128 2>&1 > log_train_gan.log
 #python train_pls_noisegan.py --mode train --data $TRAINDATA --rnn_context_len=40 2>&1 > log_train.log
 
 # only train GAN part
