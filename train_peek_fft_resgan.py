@@ -69,7 +69,8 @@ smoothwin = np.concatenate((hannwin[:edgelen/2], np.ones(400-edgelen), hannwin[e
 def theano_fft(x):
 
     # window with analysis window 
-    x_win = win * x
+    #x_win = win * x
+    x_win = x
 
     # zero-pad
     frame = T.zeros((x.shape[0], NFFT))
@@ -84,10 +85,10 @@ def theano_fft(x):
     x = x[:,:, 0]**2 + x[:,:, 1]**2 
 
     # floor (prevents log from going to -Inf)
-    x = T.maximum(x, 1e-6)
+    x = T.maximum(x, 1e-9) # -90dB
 
-    # map to log domain where 0dB -> 1 and -60dB -> -1
-    x = (1.0/3.0)*T.log10(x) + 1.0
+    # map to log domain where 0dB -> 1 and -90dB -> -1
+    x = (20.0/90.0)*T.log10(x) + 1.0
 
     # scale to weigh errors
     x = 0.1*x 
@@ -389,8 +390,6 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
             no_batches = int(X_train.shape[0] / BATCH_SIZE)                
             print("Number of batches", int(X_train.shape[0] / BATCH_SIZE))
 
-        
-
             # shuffle data
             ind = np.random.permutation(X_train.shape[0])
             X_train = X_train[ind]
@@ -423,7 +422,7 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
                     spec_gen = spec[0,:]
                     spec_ref = x_feats_batch_fft[0,:]
                     specs = np.array([spec_ref, spec_gen])
-                    specs = 10.0*np.log10(specs)
+                    #specs = 10.0*np.log10(specs)
                     plot_feats(specs, epoch, index+total_batches, ext='.spec-pls')
                     
             total_batches += no_batches
@@ -560,7 +559,7 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                 pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch])
                 loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
         
-                if (index + total_batches) % 50 == 0:
+                if (index + total_batches) % 100 == 0:
 
                     print("training batch %d, G loss: %f, D loss (real): %f, D loss (fake): %f" %
                           (index + total_batches, loss_g[0], loss_dr[0], loss_df[0]))
