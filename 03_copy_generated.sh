@@ -5,7 +5,7 @@ TARDIR='/home/ljuvela/CODE/DNNAM-nick/DNNAM-glot/scripts/currennt/ac2glot/testda
 #TARDIR='/home/ljuvela/CODE/DNNAM-nick/DNNAM-glot/scripts/currennt/ac2glot/gen/pls'
 
 EXT='.pls' # can also be .pls_nonoise
-#EXT='.pls_nonoise'
+EXT='.pls_nonoise'
 TAREXT='.pls'
 
 for f in $SRCDIR/*$EXT; do

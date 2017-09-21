@@ -259,7 +259,8 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
     x = Activation('tanh')(x)
 
     vuv = Activation('sigmoid')(vuv)
-    y = multiply([vuv, pls]) # voicing gate for deterministic component
+    #y = multiply([vuv, pls]) # voicing gate for deterministic component
+    y = pls
     x = add([x, y])
 
     #x = add([pls, x]) # force additivity   
@@ -559,12 +560,12 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                 pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch])
                 loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
         
-                if (index + total_batches) % 100 == 0:
+                if (index + total_batches) % 500 == 0:
 
                     print("training batch %d, G loss: %f, D loss (real): %f, D loss (fake): %f" %
                           (index + total_batches, loss_g[0], loss_dr[0], loss_df[0]))
 
-                if (index + total_batches) % 100 == 0:
+                if (index + total_batches) % 500 == 0:
 
                     wav_ref = pls_real[0,:]
                     wav_gen = pls_pred[0,:]

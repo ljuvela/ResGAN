@@ -251,7 +251,8 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
     x = Activation('tanh')(x)
 
     vuv = Activation('sigmoid')(vuv)
-    y = multiply([vuv, pls]) # voicing gate for deterministic component
+    #y = multiply([vuv, pls]) # voicing gate for deterministic component
+    y = pls
     x = add([x, y])
 
     #x = add([pls, x]) # force additivity   
