@@ -4,7 +4,6 @@ import numpy as np
 np.random.seed(9999)
 
 import sys
-sys.setrecursionlimit(10000)
 
 # theano imports 
 import theano
@@ -44,18 +43,6 @@ from matplotlib import pyplot as plt
 fbins = 400
 NFFT = (fbins-1)*2
 
-fs = 16000
-
-# FFT analysis window
-#win_np = np.kaiser(400, 6.0)
-win_np = np.hamming(400) # include values near edges to avoid don't care effects
-win = theano.shared(win_np)
-
-# GAN intermediate window
-#win32 = win_np.astype(np.float32)+0.01
-win32 = np.ones(400, dtype=np.float32)
-win32_gpu = theano.shared(win32.astype(np.float32))
-
 #from pls_utils import *
 from data_utils import *
 
@@ -65,11 +52,8 @@ edgelen = sum(gen_filtwidths-1)
 hannwin = np.hanning(edgelen)
 smoothwin = np.concatenate((hannwin[:edgelen/2], np.ones(400-edgelen), hannwin[edgelen/2:]))
 
-
 def theano_fft(x):
 
-    # window with analysis window 
-    #x_win = win * x
     x_win = x
 
     # zero-pad
@@ -94,16 +78,6 @@ def theano_fft(x):
     x = 0.1*x 
 
     return x 
-
-# generalized KL-divergence for power spectrum loss
-def spectrum_kullback_leibler_divergence(y_true, y_pred):
-    epsilon = 1e-9
-    maxval = 1e9
-    y_true = K.clip(y_true, epsilon, maxval)
-    y_pred = K.clip(y_pred, epsilon, maxval)
-    #return K.sum(y_true * K.log(y_true / y_pred), axis=-1)
-    return K.sum(y_true*K.log(y_true) - y_true*K.log(y_pred) - y_true + y_pred, axis=-1)
-
 
 # Keras wrapper for FFT layer
 def fft_output_shape(x_shape):
@@ -138,26 +112,18 @@ win_layer.trainable = False
 def fft_model(model_name="fft_model"):
     x = Input(shape=(400,), name="fft_input")
     x_fft = fft_layer(x)
-    #x_fft = log_layer(x_fft)
     model = Model(input=[x], output=[x_fft], name=model_name)
     return model
 
-def time_glot_model(timesteps=128, input_dim=48, output_dim=400, model_name="time_glot_model"):
+def time_glot_model(timesteps=128, input_dim=22, output_dim=400, model_name="time_glot_model"):
 
     ac_input = Input(shape=(timesteps, input_dim), name="ac_input")
  
-    #x_t = Masking(mask_value=0., input_shape=(timesteps, input_dim))(ac_input)
     x_t = ac_input
     
     x_t = GRU(50, activation='relu', kernel_initializer='glorot_normal', 
               return_sequences=False, unroll=False)(x_t)
     
-    """
-    x_t = Dense(256, activation='relu', kernel_initializer='glorot_normal')(x_t)
-    x_t = Dense(512, activation='relu', kernel_initializer='glorot_normal')(x_t)     
-    x_t = Dense(output_dim, activation='linear', kernel_initializer='glorot_normal')(x_t)
-    """
-
     x = x_t
     
     x = Dense(output_dim)(x)
@@ -210,17 +176,14 @@ def time_glot_model(timesteps=128, input_dim=48, output_dim=400, model_name="tim
 
     return model
 
-def generator(input_dim=400, ac_dim=48, output_dim=400):
+def generator(input_dim=400, ac_dim=22, output_dim=400):
     
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
-    vuv_input = Input((1,), name="vuv_input")
 
     pls = Reshape((input_dim, 1))(pls_input)    
     noise = Reshape((input_dim, 1))(noise_input)
-    vuv = Reshape((1,1))(vuv_input)
-    vuv = UpSampling1D(size=input_dim)(vuv) # is this needed or is broadcasting automatic?
-
+ 
     x = concatenate([pls, noise], axis=2) # concat as different channels
 
     x = Convolution1D(filters=100,
@@ -255,15 +218,10 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
                       padding='same',
                         strides=1)(x)
 
-    # tanh activation (GAN hacks)
     x = Activation('tanh')(x)
 
-    vuv = Activation('sigmoid')(vuv)
-    #y = multiply([vuv, pls]) # voicing gate for deterministic component
-    y = pls
-    x = add([x, y])
-
-    #x = add([pls, x]) # force additivity   
+    # force additivity   
+    x = add([pls, x]) 
              
     # remove singleton outer dimension 
     x = Reshape((output_dim,))(x)
@@ -271,7 +229,7 @@ def generator(input_dim=400, ac_dim=48, output_dim=400):
     # add fft channel to output
     x_fft = fft_layer(x)
      
-    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x, x_fft],
+    model = Model(inputs=[pls_input, noise_input], outputs=[x, x_fft],
                   name="generator")
 
     return model
@@ -331,19 +289,17 @@ def discriminator(input_dim=400):
 
     return model
 
-def gan_container(generator, discriminator, input_dim=400, ac_dim=48):
+def gan_container(generator, discriminator, input_dim=400, ac_dim=22):
    
     discriminator.trainable = False
 
     pls_input = Input(shape=(input_dim,), name="pls_input")
     noise_input = Input(shape=(input_dim,), name="noise_input")
-    vuv_input = Input((1,), name="vuv_input")
 
-    x, x_fft = generator([pls_input, noise_input, vuv_input])
-    #x = win_layer(x) # apply window
+    x, x_fft = generator([pls_input, noise_input])
     x, peek_output = discriminator([x, x_fft])
 
-    model = Model(inputs=[pls_input, noise_input, vuv_input], outputs=[x, peek_output],
+    model = Model(inputs=[pls_input, noise_input], outputs=[x, peek_output],
                   name="gan_container")
     return model
 
@@ -355,20 +311,18 @@ def plot_feats(generated_feats, epoch, index, ext='', fig_dir="./figures", fig_t
     plt.savefig(fig_dir + '/' + fig_type +'_epoch{}_index{}'.format(epoch, index) + ext + '.png')
     plt.close()
 
-
 def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=30):
     
     timesteps = context_len
 
     optim = adam(lr=0.0001)
     pls_model = time_glot_model(timesteps=timesteps)
-    #pls_model.compile(loss=['mse', 'mse'], loss_weights=[1.0, 1e-3], optimizer=optim)
     pls_model.compile(loss=['mse', 'mse'], loss_weights=[1.0, 0.0], optimizer=optim) # disregard fft loss
 
     fft_mod = fft_model()
 
     # train glot model in time domain first 
-    no_epochs = 40
+    no_epochs = 30
     max_epochs_no_improvement = 5
 
     patience = max_epochs_no_improvement
@@ -423,7 +377,6 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
                     spec_gen = spec[0,:]
                     spec_ref = x_feats_batch_fft[0,:]
                     specs = np.array([spec_ref, spec_gen])
-                    #specs = 10.0*np.log10(specs)
                     plot_feats(specs, epoch, index+total_batches, ext='.spec-pls')
                     
             total_batches += no_batches
@@ -436,15 +389,13 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
                                       [val_data[0], val_spec],
                                       batch_size=BATCH_SIZE)
         
-        
         print("epoch %d validation wave loss: %f ,spec loss %f \n" %
               (epoch, val_loss[0], val_loss[1]))
 
         print("epoch %d training wave loss: %f, spec loss %f \n" %
               (epoch, epoch_error[0], epoch_error[1]))
         
-
-        # only on wave loss (why not both?)
+        # only on wave loss
         if val_loss[0] < best_val_loss:
             best_val_loss = val_loss[0]
             patience = max_epochs_no_improvement
@@ -478,11 +429,13 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
  
     gen_model.compile(loss='mse', optimizer="adam")
 
+    # use peek adversarial and peek mse loss for training generator
     disc_model.trainable = False
-    disc_on_gen.compile(loss=['mse','mse'], loss_weights=[1.0, 1.0], optimizer=optim_container) # use peek adversarial and peek mse loss for training generator
+    disc_on_gen.compile(loss=['mse','mse'], loss_weights=[1.0, 1.0], optimizer=optim_container) 
 
+    # don't use peek loss for discriminator
     disc_model.trainable = True
-    disc_model.compile(loss=['mse','mse'], loss_weights=[1.0, 0.0], optimizer=optim_discriminator) # don't use peek loss for discriminator
+    disc_model.compile(loss=['mse','mse'], loss_weights=[1.0, 0.0], optimizer=optim_discriminator) 
 
     print "Discriminator model:"
     print disc_model.summary()
@@ -494,12 +447,8 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
     label_fake = np.zeros((BATCH_SIZE, 1), dtype=np.float32)
     label_real = np.ones((BATCH_SIZE, 1), dtype=np.float32)
 
-    m_vuv = stats.getInputMean()[-1]
-    s_vuv = stats.getInputStd()[-1]
-
-    # train residual FFT based  model    
+    # train residual GAN with FFT     
     no_epochs = 20
-
     for epoch in range(no_epochs):
         print("Epoch is", epoch)
 
@@ -531,33 +480,28 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                 pls_pred = x_pred_batch
                 pls_real = x_feats_batch
 
-                # smoothing windows to combat edge effects
+                # smoothing windows to prevent edge effects
                 pls_pred *= smoothwin
                 pls_real *= smoothwin
 
                 # evaluate target fft
                 fft_real = fft_mod.predict(pls_real)
 
-                vuv_batch = y_feats_batch[:,-1,-1] #take last timestep, vuv is last feature, 
-                vuv_batch = vuv_batch * s_vuv + m_vuv
-
                 noise = np.random.randn(BATCH_SIZE, pls_len)
-                noise *= smoothwin
 
                 # train generator through discriminator
                 _, peek_real = disc_model.predict([pls_real, fft_real])
                 disc_model.trainable = False
-                loss_g = disc_on_gen.train_on_batch([pls_pred, noise, vuv_batch], [label_real, peek_real])
+                loss_g = disc_on_gen.train_on_batch([pls_pred, noise], [label_real, peek_real])
  
                 noise = np.random.randn(BATCH_SIZE, pls_len)
-                noise *= smoothwin
 
                 # train discriminator with real data
                 disc_model.trainable = True
                 loss_dr = disc_model.train_on_batch([pls_real, fft_real], [label_real, peek_real])
 
                 # train discriminator with fake data
-                pls_fake, fft_fake = gen_model.predict([pls_pred, noise, vuv_batch])
+                pls_fake, fft_fake = gen_model.predict([pls_pred, noise])
                 loss_df = disc_model.train_on_batch([pls_fake, fft_fake], [label_fake, peek_real])
         
                 if (index + total_batches) % 500 == 0:
@@ -579,7 +523,6 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
 
     print "Finished noise model training" 
 
-
 def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
              base_model_path='./pls.model', gan_model_path='./noise_gen.model'):
     
@@ -592,20 +535,14 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
     pulse_model.load_weights(base_model_path)
     gan_model.load_weights(gan_model_path)
 
-    m_vuv = stats.getInputMean()[-1]
-    s_vuv = stats.getInputStd()[-1]
-
     for data in nc_data_provider(file_list, data_dir, input_only=True, 
                                  context_len=context_len):
         for fname, ac_data in data.iteritems():
             print fname
-            
-            vuv = ac_data[:,-1,-1] #take last timestep, vuv is last feature, 
-            vuv = vuv * s_vuv + m_vuv
-                                  
+                                              
             pls_pred, _ = pulse_model.predict([ac_data])
             noise = np.random.randn(pls_pred.shape[0], pls_pred.shape[1])
-            pls_gan, _ = gan_model.predict([pls_pred, noise, vuv])
+            pls_gan, _ = gan_model.predict([pls_pred, noise])
             
             out_file = os.path.join(args.output_dir, fname + '.pls')
             pls_gan.astype(np.float32).tofile(out_file)
@@ -613,7 +550,6 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
             out_file = os.path.join(args.output_dir, fname + '.pls_nonoise')
             pls_pred.astype(np.float32).tofile(out_file)
     
-
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", type=str)
@@ -684,6 +620,5 @@ if __name__ == "__main__":
                  output_dir=args.output_dir,
                  context_len=args.rnn_context_len, stats=stats,
                  gan_model_path=args.gan_model)
-        #input_data = load_test_data(te)
 
         
