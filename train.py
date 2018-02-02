@@ -42,7 +42,7 @@ mpl.use('Agg') # no need for X-server
 from matplotlib import pyplot as plt
 
 from models import fft_model, time_glot_model, discriminator, generator, gan_container
-from data_utils import nc_data_provider
+from data_utils import nc_data_provider, norm_stats
 
 # edge smoothing window
 gen_filtwidths = np.asarray([15, 15, 15])
@@ -59,8 +59,7 @@ def plot_feats(generated_feats, epoch, index, ext='', fig_dir="./figures", fig_t
 
 def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=30):
     
-    #no_epochs = 30
-    no_epochs = 1
+    no_epochs = 20
     max_epochs_no_improvement = 5
 
     timesteps = context_len
@@ -159,8 +158,7 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
 def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                       context_len=32, max_files=30, stats=None):
 
-    #no_epochs = 20
-    no_epochs = 1
+    no_epochs = 15
     
     timesteps = context_len
 
