@@ -1,2 +1,2 @@
 #!/bin/bash
-python train_resgan.py --mode train --data ./traindata --rnn_context_len=40 --batch_size=128
+python train.py --mode train --data_dir=./traindata --rnn_context_len=1 --batch_size=128
