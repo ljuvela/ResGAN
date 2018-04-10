@@ -88,7 +88,7 @@ win_layer.trainable = False
 def fft_model(model_name="fft_model"):
     x = Input(shape=(400,), name="fft_input")
     x_fft = fft_layer(x)
-    model = Model(input=[x], output=[x_fft], name=model_name)
+    model = Model(inputs=[x], outputs=[x_fft], name=model_name)
     return model
 
 def time_glot_model(timesteps=128, input_dim=22, output_dim=400, model_name="time_glot_model"):
@@ -148,7 +148,7 @@ def time_glot_model(timesteps=128, input_dim=22, output_dim=400, model_name="tim
         
     x_fft = fft_layer(x)
 
-    model = Model(input=[ac_input], output=[x_t, x_fft], name=model_name)
+    model = Model(inputs=[ac_input], outputs=[x_t, x_fft], name=model_name)
 
     return model
 

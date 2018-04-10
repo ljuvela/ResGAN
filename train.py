@@ -125,7 +125,7 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
                     specs = np.array([spec_ref, spec_gen])
                     plot_feats(specs, epoch, index+total_batches, ext='.spec-pls')
                     
-                total_batches += no_batches                
+            total_batches += no_batches                
 
         epoch_error[0] /= total_batches
         epoch_error[1] /= total_batches
