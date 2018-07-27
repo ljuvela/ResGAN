@@ -5,15 +5,9 @@ import numpy as np
 np.random.seed(42)
 
 # force cuda device (empty for CPU)
-#os.environ["CUDA_VISIBLE_DEVICES"]=""
+os.environ["CUDA_VISIBLE_DEVICES"]=""
 
 import sys
-
-# theano imports 
-import theano
-import theano.tensor as T
-from theano.tensor import fft
-
 from keras import backend as K
 
 # keras imports
@@ -48,7 +42,7 @@ from data_utils import nc_data_provider, norm_stats
 gen_filtwidths = np.asarray([15, 15, 15])
 edgelen = sum(gen_filtwidths-1)
 hannwin = np.hanning(edgelen)
-smoothwin = np.concatenate((hannwin[:edgelen/2], np.ones(400-edgelen), hannwin[edgelen/2:]))
+smoothwin = np.concatenate((hannwin[:edgelen//2], np.ones(400-edgelen), hannwin[edgelen//2:]))
 
 def plot_feats(generated_feats, epoch, index, ext='', fig_dir="./figures", fig_type=""):
     plt.figure()
@@ -118,12 +112,12 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
                     wav_gen = wave[0,:]
                     wav_ref = x_feats_batch[0,:]
                     wavs = np.array([wav_ref, wav_gen])
-                    plot_feats(wavs, epoch, index+total_batches, ext='.wave-pls')
+                    plot_feats(wavs, epoch, index+total_batches, fig_type='mse', ext='.wave-pls')
 
                     spec_gen = spec[0,:]
                     spec_ref = x_feats_batch_fft[0,:]
                     specs = np.array([spec_ref, spec_gen])
-                    plot_feats(specs, epoch, index+total_batches, ext='.spec-pls')
+                    plot_feats(specs, epoch, index+total_batches, fig_type='mse', ext='.spec-pls')
                     
             total_batches += no_batches                
 
@@ -152,7 +146,7 @@ def train_pls_model(BATCH_SIZE, data_dir, file_list, context_len=32, max_files=3
         if patience == 0:
             break
 
-    print "Finished training" 
+    print ("Finished training") 
 
 
 def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
@@ -185,12 +179,12 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
     disc_model.trainable = True
     disc_model.compile(loss=['mse','mse'], loss_weights=[1.0, 0.0], optimizer=optim_discriminator) 
 
-    print "Discriminator model:"
-    print disc_model.summary()
-    print "Generator model:"
-    print gen_model.summary()
-    print "Joint model:"
-    print disc_on_gen.summary()
+    print ("Discriminator model:")
+    print (disc_model.summary())
+    print ("Generator model:")
+    print (gen_model.summary())
+    print ("Joint model:")
+    print (disc_on_gen.summary())
 
     label_fake = np.zeros((BATCH_SIZE, 1), dtype=np.float32)
     label_real = np.ones((BATCH_SIZE, 1), dtype=np.float32)
@@ -262,13 +256,17 @@ def train_noise_model(BATCH_SIZE, data_dir, file_list, save_weights=False,
                     wav_gen = pls_pred[0,:]
                     wav_noised = pls_fake[0,:]
                     wavs = np.array([wav_ref, wav_gen, wav_noised])
-                    plot_feats(wavs, epoch, index+total_batches, ext='.wave')
-                 
+                    plot_feats(wavs, epoch, index+total_batches, fig_type='gan', ext='.wave')
+                    spec_ref = fft_real[0,:]
+                    spec_noised = fft_fake[0,:]
+                    specs = np.array([spec_ref, spec_noised])
+                    plot_feats(specs, epoch, index+total_batches, fig_type='gan', ext='.spec')
+
             total_batches += no_batches
 
         gen_model.save_weights('./models/noise_gen_epoch' + str(epoch) + '.model')
 
-    print "Finished noise model training" 
+    print ("Finished noise model training") 
 
 def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
              base_model_path='./pls.model', gan_model_path='./noise_gen.model'):
@@ -285,7 +283,7 @@ def generate(file_list, data_dir, output_dir, context_len=32, stats=None,
     for data in nc_data_provider(file_list, data_dir, input_only=True, 
                                  context_len=context_len):
         for fname, ac_data in data.iteritems():
-            print fname
+            print (fname)
                                               
             pls_pred, _ = pulse_model.predict([ac_data])
             noise = np.random.randn(pls_pred.shape[0], pls_pred.shape[1])
@@ -332,7 +330,6 @@ if __name__ == "__main__":
                           file_list=file_list, max_files=args.max_files,
                           context_len=args.rnn_context_len,
                           stats=stats)
-
 
     elif args.mode == "train_pulse_model":
         print ("MODE: Training time domain pulse model")

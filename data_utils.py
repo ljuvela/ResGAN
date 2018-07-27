@@ -40,13 +40,15 @@ def load_data(files_list, data_dir, num_files=30, context_len=32):
     seq_lengths = []
 
     for fname in files_list[:num_files]:
-        print fname
+        print (fname)
         f = os.path.join(data_dir, fname)
         with netcdf.netcdf_file(f, 'r') as fid:
 
             seq_tags = fid.variables['seqTags'][:].copy()
             for t in seq_tags:
-                tags.append(''.join(t))
+                #tags.append(''.join(t))
+                tag = b"".join(t)
+                tags.append(tag.decode("utf-8")) #python3
 
             lens = fid.variables['seqLengths'][:].copy()
             for l in lens:
@@ -101,13 +103,15 @@ def load_test_data(files_list, data_dir, num_files=30, context_len=32):
     seq_lengths = []
 
     for fname in files_list[:num_files]:
-        print fname
+        print (fname)
         f = os.path.join(data_dir, fname)
         with netcdf.netcdf_file(f, 'r') as fid:
 
             seq_tags = fid.variables['seqTags'][:].copy()
             for t in seq_tags:
-                tags.append(''.join(t))
+                #tags.append(''.join(t))
+                tag = b"".join(t)
+                tags.append(tag.decode("utf-8")) #python3
 
             lens = fid.variables['seqLengths'][:].copy()
             for l in lens:
@@ -185,3 +189,5 @@ class nc_data_provider:
                 self.in_data = in_data
                 self.i += 1
                 return [self.out_data, self.in_data]
+
+    __next__ = next # Python 3.X compatibility

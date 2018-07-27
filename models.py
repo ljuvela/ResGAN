@@ -3,12 +3,7 @@ import numpy as np
 np.random.seed(9999)
 
 import sys
-
-# theano imports 
-import theano
-import theano.tensor as T
-from theano.tensor import fft
-
+import tensorflow as tf
 from keras import backend as K
 
 # keras imports
@@ -22,44 +17,50 @@ from keras.layers.normalization import BatchNormalization
 from keras.layers.convolutional import Convolution1D
 from keras.optimizers import SGD, adam
 
-
 # 'Globals'
 fbins = 400
 NFFT = (fbins-1)*2
 
 
-def theano_fft(x):
+def tf_log10(x):
+  numerator = tf.log(x)
+  denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
+  return numerator / denominator
 
-    x_win = x
+def tensorflow_fft(x, nfft=NFFT, log_scale=0.1):
 
-    # zero-pad
-    frame = T.zeros((x.shape[0], NFFT))
-    frame = T.set_subtensor(frame[:,:x.shape[1]], x_win)
-    
-    # apply FFT
-    x = fft.rfft(frame, norm='ortho')
+     # clip for safety
+    x = tf.clip_by_value(x, clip_value_min=-1e9, clip_value_max=1e9)
 
-    # get first half of spectrum
-    x = x[:,:fbins] 
-    # squared magnitude
-    x = x[:,:, 0]**2 + x[:,:, 1]**2 
+    # get shape parameters
+    win_len = tf.shape(x)[-1]
+    nfft = (win_len-1) * 2
 
-    # floor (prevents log from going to -Inf)
-    x = T.maximum(x, 1e-9) # -90dB
+    # fft with zero padding 
+    pad = tf.zeros_like(x[:, :(nfft-win_len)])
+    x_pad = tf.concat([x,pad], axis=-1)
+    x_c =  tf.cast(x_pad, dtype=tf.complex64)
+    X = tf.spectral.fft(x_c)
+    X = X[:,:win_len]
+    X = X / np.sqrt(1.0*NFFT)
+    X = tf.abs(X)**2
+    X = tf.cast(X, dtype=x.dtype) # back to original datatype!!
 
+    # floor to prevent log of zero
+    X = tf.maximum(X, 1e-9)
     # map to log domain where 0dB -> 1 and -90dB -> -1
-    x = (20.0/90.0)*T.log10(x) + 1.0
-
+    X = tf_log10(X) * (20.0/90.0) + 1.0
     # scale to weigh errors
-    x = 0.1*x 
-
-    return x 
+    X = log_scale*X 
+  
+    return X
 
 # Keras wrapper for FFT layer
 def fft_output_shape(x_shape):
     return (x_shape[0],fbins)
 
-fft_layer = Lambda(theano_fft, output_shape=fft_output_shape)
+#fft_layer = Lambda(theano_fft, output_shape=fft_output_shape)
+fft_layer = Lambda(tensorflow_fft, output_shape=fft_output_shape)
 fft_layer.trainable = False
 
 # Keras wrapper for log 
@@ -67,22 +68,16 @@ def identity_output_shape(x_shape):
     return x_shape
 
 def log_operation(x):
-    return 10*T.log10(x)
+    return tf_log10(x)
 
 log_layer = Lambda(log_operation, output_shape=identity_output_shape)
 log_layer.trainable = False
 
 def exp_operation(x):
-    return T.pow(10.0, x/10.0)
+    return tf.pow(10.0, x/10.0)
 
 exp_layer = Lambda(exp_operation, output_shape=identity_output_shape)
 exp_layer.trainable = False
-
-def win_operation(x):
-    return win32_gpu*x
-
-win_layer = Lambda(win_operation, output_shape=identity_output_shape)
-win_layer.trainable = False
 
 # fft model for transforming training set samples
 def fft_model(model_name="fft_model"):

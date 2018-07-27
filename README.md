@@ -1,21 +1,21 @@
 # MFCC residual waveform generation with GAN
 
-
 This repository contains code related to our ICASSP 2018 paper https://arxiv.org/abs/1804.00920
  
-
 Residual learning with generative adversarial networks is involved (hence the name ResGAN). For details, check the paper and model architecture section below.
 
 Audio samples are available at http://tts.org.aalto.fi/mfcc_synthesis/.
 
 ## Requirements
 
-Requirement versions are based on my experiment system, an there's no specific reason why the code wouldn't work on older versions
+Requirement versions are based on my experiment system, an there's no specific reason why the code wouldn't work on older versions.
 
-* python
+The code now uses Tensorflow backend and python 3, theano has been removed from requirements
+
+* python >= 3.6
 * numpy >= 1.11.0
 * scipy >= 0.17.0
-* theano >= 0.9.0
+* tensorflow >= 1.7.0
 * keras >= 2.0.2
 * sklearn >= 0.18.2
 * matplotlib >= 2.0.0
